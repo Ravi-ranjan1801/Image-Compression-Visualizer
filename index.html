@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Compression Visualizer — DCT & Wavelet</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #10141c;
+    --surface2: #161b26;
+    --border: #1e2635;
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+    --warn: #f97316;
+    --success: #22c55e;
+    --text: #e8eaf0;
+    --muted: #6b7a99;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* GRID BACKGROUND */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  /* HEADER */
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 0 0 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .header-left h1 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    line-height: 1.2;
+  }
+  .header-left h1 span { color: var(--accent); }
+  .header-left p {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 300;
+  }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 2px;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+  .badge-dct { background: rgba(0,212,255,0.12); color: var(--accent); border: 1px solid rgba(0,212,255,0.25); }
+  .badge-wav { background: rgba(124,58,237,0.12); color: #a78bfa; border: 1px solid rgba(124,58,237,0.25); }
+  .badge-live { background: rgba(34,197,94,0.12); color: var(--success); border: 1px solid rgba(34,197,94,0.25); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  /* UPLOAD ZONE */
+  .upload-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface);
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(0,212,255,0.04); }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; color: var(--muted); }
+  .upload-zone p { font-size: 13px; color: var(--muted); }
+  .upload-zone strong { color: var(--accent); font-weight: 500; }
+
+  /* TRANSFORM SELECTOR */
+  .transform-selector {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .t-btn {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+  }
+  .t-btn:hover { border-color: var(--muted); }
+  .t-btn.active-dct { border-color: var(--accent); background: rgba(0,212,255,0.07); }
+  .t-btn.active-wav { border-color: #7c3aed; background: rgba(124,58,237,0.07); }
+  .t-btn .t-name { font-family: var(--mono); font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .t-btn.active-dct .t-name { color: var(--accent); }
+  .t-btn.active-wav .t-name { color: #a78bfa; }
+  .t-btn .t-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
+  /* CONTROLS PANEL */
+  .controls-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  @media(max-width:700px) { .controls-panel { grid-template-columns: 1fr; } }
+  .ctrl-group label {
+    display: block;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--muted);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .ctrl-group label span { color: var(--accent); font-size: 13px; }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(0,212,255,0.5);
+  }
+  .slider-dct input[type=range]::-webkit-slider-thumb { background: var(--accent); box-shadow: 0 0 8px rgba(0,212,255,0.5); }
+  .slider-wav input[type=range]::-webkit-slider-thumb { background: #a78bfa; box-shadow: 0 0 8px rgba(124,58,237,0.5); }
+  select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+  select:focus { border-color: var(--accent); }
+
+  /* METRICS ROW */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media(max-width:700px) { .metrics-row { grid-template-columns: repeat(2,1fr); } }
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    transition: border-color 0.3s;
+  }
+  .metric-card.highlight { border-color: var(--accent); }
+  .metric-card .m-label { font-family: var(--mono); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; }
+  .metric-card .m-val { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
+  .metric-card .m-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  #qualBadge { display: inline-block; font-size: 10px; font-family: var(--mono); font-weight: 700; padding: 2px 7px; border-radius: 2px; margin-top: 5px; }
+
+  /* QUALITY BAR */
+  .quality-bar-wrap { margin-bottom: 24px; }
+  .quality-bar-wrap .qb-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .quality-bar-wrap .qb-header span { font-size: 11px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+  .quality-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+  .quality-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease, background 0.4s;
+  }
+
+  /* CANVAS GRID */
+  .canvas-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media(max-width:900px) { .canvas-grid { grid-template-columns: repeat(2,1fr); } }
+  @media(max-width:500px) { .canvas-grid { grid-template-columns: 1fr; } }
+  .canvas-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .canvas-panel:hover { border-color: var(--muted); }
+  .canvas-panel canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    image-rendering: pixelated;
+  }
+  .canvas-panel .cp-label {
+    padding: 9px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cp-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .dot-orig { background: var(--success); }
+  .dot-comp { background: var(--accent); }
+  .dot-coeff { background: #a78bfa; }
+  .dot-diff { background: var(--warn); }
+
+  /* HISTOGRAM */
+  .histogram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .histogram-wrap h3 { font-family: var(--mono); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 16px; }
+  #histCanvas { width: 100%; height: 80px; display: block; }
+
+  /* EXPLANATION BOX */
+  .explanation {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  }
+  .explanation.wav { border-left-color: #7c3aed; }
+  .explanation h3 { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.07em; }
+  .explanation.wav h3 { color: #a78bfa; }
+  .explanation p { font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .explanation p strong { color: var(--text); font-weight: 500; }
+
+  /* STATUS BAR */
+  .status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 100;
+  }
+  .status-bar .sb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: pulse 1.5s infinite; flex-shrink: 0; }
+  .status-bar .sb-dot.working { background: var(--warn); }
+  .status-bar .sb-text { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .status-bar .sb-sep { color: var(--border); margin: 0 4px; }
+
+  /* LOADING OVERLAY */
+  .loading-overlay {
+    position: absolute; inset: 0;
+    background: rgba(10,12,16,0.85);
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    z-index: 10;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .loading-overlay.show { opacity: 1; pointer-events: all; }
+  .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* FADE IN */
+  .fade-in { animation: fadeIn 0.5s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 0;
+  }
+  @media(max-width:700px) { .info-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app fade-in">
+
+  <!-- HEADER -->
+  <header>
+    <div class="header-left">
+      <h1>IMAGE <span>COMPRESSION</span> VISUALIZER</h1>
+      <p>Discrete Cosine Transform &amp; Haar Wavelet Transform — Interactive Analysis</p>
+    </div>
+    <div class="badge-row">
+      <span class="badge badge-dct">DCT</span>
+      <span class="badge badge-wav">WAVELET</span>
+      <span class="badge badge-live">● LIVE</span>
+    </div>
+  </header>
+
+  <!-- UPLOAD -->
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept="image/*">
+    <div class="upload-icon">⊕</div>
+    <p><strong>Click to upload</strong> or drag &amp; drop an image — or use the built-in demo</p>
+  </div>
+
+  <!-- TRANSFORM SELECTOR -->
+  <div class="transform-selector">
+    <button class="t-btn active-dct" id="btnDCT" onclick="setMode('dct')">
+      <div class="t-name">DCT — Discrete Cosine Transform</div>
+      <div class="t-desc">Block-based frequency decomposition. Foundation of JPEG. Isolates spatial frequencies per block.</div>
+    </button>
+    <button class="t-btn" id="btnWAV" onclick="setMode('wavelet')">
+      <div class="t-name">WAVELET — Haar Transform</div>
+      <div class="t-desc">Multi-resolution global decomposition. Captures structure at all scales. Foundation of JPEG 2000.</div>
+    </button>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls-panel">
+    <div class="ctrl-group" id="sliderGroup">
+      <label>RETAIN COEFFICIENTS &nbsp;<span id="retainVal">15%</span></label>
+      <input type="range" min="1" max="100" step="1" value="15" id="retainSlider">
+    </div>
+    <div class="ctrl-group" id="blockGroup">
+      <label>BLOCK SIZE (DCT)</label>
+      <select id="blockSelect">
+        <option value="8" selected>8×8 &nbsp;— JPEG Standard</option>
+        <option value="16">16×16 — Larger blocks</option>
+        <option value="32">32×32 — Macro blocks</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <label>COLOR CHANNEL</label>
+      <select id="channelSelect">
+        <option value="rgb" selected>RGB (all channels)</option>
+        <option value="luma">Luma only (grayscale)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- METRICS -->
+  <div class="metrics-row">
+    <div class="metric-card" id="cardRatio">
+      <div class="m-label">Compression Ratio</div>
+      <div class="m-val" id="mRatio">—</div>
+      <div class="m-sub">stored : original</div>
+    </div>
+    <div class="metric-card">
+      <div class="m-label">Coefficients Kept</div>
+      <div class="m-val" id="mCoeff">—</div>
+      <div class="m-sub">out of <span id="mTotal">—</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="m-label">MSE (loss)</div>
+      <div class="m-val" id="mMSE">—</div>
+      <div class="m-sub">mean squared error</div>
+    </div>
+    <div class="metric-card">
+      <div class="m-label">PSNR</div>
+      <div class="m-val" id="mPSNR">—</div>
+      <div class="m-sub"><span id="qualBadge"></span></div>
+    </div>
+  </div>
+
+  <!-- QUALITY BAR -->
+  <div class="quality-bar-wrap">
+    <div class="qb-header">
+      <span>Image Quality</span>
+      <span id="qbRight">—</span>
+    </div>
+    <div class="quality-bar">
+      <div class="quality-fill" id="qualFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- CANVAS PANELS -->
+  <div class="canvas-grid" style="position:relative;">
+    <div class="canvas-panel">
+      <canvas id="cOrig" width="256" height="256"></canvas>
+      <div class="cp-label"><span>Original</span><span class="cp-dot dot-orig"></span></div>
+    </div>
+    <div class="canvas-panel">
+      <canvas id="cComp" width="256" height="256"></canvas>
+      <div class="cp-label"><span>Reconstructed</span><span class="cp-dot dot-comp"></span></div>
+    </div>
+    <div class="canvas-panel">
+      <canvas id="cCoeff" width="256" height="256"></canvas>
+      <div class="cp-label"><span>Coefficient Map</span><span class="cp-dot dot-coeff"></span></div>
+    </div>
+    <div class="canvas-panel">
+      <canvas id="cDiff" width="256" height="256"></canvas>
+      <div class="cp-label"><span>Loss Map</span><span class="cp-dot dot-diff"></span></div>
+    </div>
+  </div>
+
+  <!-- HISTOGRAM -->
+  <div class="histogram-wrap">
+    <h3>Pixel Difference Histogram — Information Loss Distribution</h3>
+    <canvas id="histCanvas" width="800" height="80"></canvas>
+  </div>
+
+  <!-- INFO CARDS -->
+  <div class="info-grid">
+    <div class="explanation" id="explBox">
+      <h3 id="explTitle">DCT — How it works</h3>
+      <p id="explText">
+        The image is divided into <strong>N×N blocks</strong>. Each block undergoes a 2D DCT — 
+        transforming pixel values into <strong>frequency coefficients</strong>. 
+        Low-frequency (smooth) info sits top-left; high-frequency (detail) sits bottom-right. 
+        Zeroing out small coefficients and running inverse DCT gives the compressed result.
+        This is the core of <strong>JPEG compression</strong>.
+      </p>
+    </div>
+    <div class="explanation wav" id="explBox2">
+      <h3>Reading the visuals</h3>
+      <p>
+        <strong>Coefficient Map</strong> — bright pixels = retained data, black = discarded. 
+        <strong>Loss Map</strong> — red intensity shows where information was destroyed. 
+        Bright red clusters = blocking artifacts (DCT) or edge smearing (Wavelet). 
+        High PSNR (&gt;40 dB) = visually lossless. Below 30 dB = visible degradation.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="sb-dot" id="sbDot"></div>
+  <div class="sb-text" id="sbText">Ready — Upload an image or using demo</div>
+  <span class="sb-sep">|</span>
+  <div class="sb-text" id="sbMode">Mode: DCT · Block: 8×8</div>
+  <span class="sb-sep">|</span>
+  <div class="sb-text" id="sbTime"></div>
+</div>
+
+<script>
+const SZ = 256;
+let mode = 'dct';
+let origData = null;
+let processing = false;
+
+// ─── UI BINDINGS ────────────────────────────────────────────────────────────
+document.getElementById('retainSlider').oninput = function() {
+  document.getElementById('retainVal').textContent = this.value + '%';
+  run();
+};
+document.getElementById('blockSelect').onchange = run;
+document.getElementById('channelSelect').onchange = run;
+
+function setMode(m) {
+  mode = m;
+  const dctBtn = document.getElementById('btnDCT');
+  const wavBtn = document.getElementById('btnWAV');
+  dctBtn.className = 't-btn' + (m==='dct' ? ' active-dct' : '');
+  wavBtn.className = 't-btn' + (m==='wavelet' ? ' active-wav' : '');
+  const sliderGroup = document.getElementById('sliderGroup');
+  sliderGroup.className = 'ctrl-group ' + (m==='dct' ? 'slider-dct' : 'slider-wav');
+  document.getElementById('blockGroup').style.opacity = m==='dct' ? '1' : '0.4';
+  const eb = document.getElementById('explBox');
+  const et = document.getElementById('explTitle');
+  const ep = document.getElementById('explText');
+  if (m === 'dct') {
+    eb.className = 'explanation';
+    et.textContent = 'DCT — How it works';
+    ep.innerHTML = 'The image is divided into <strong>N×N blocks</strong>. Each block undergoes a 2D DCT — transforming pixel values into <strong>frequency coefficients</strong>. Low-frequency (smooth) info sits top-left; high-frequency (detail) sits bottom-right. Zeroing out small coefficients and running inverse DCT gives the compressed result. This is the core of <strong>JPEG compression</strong>.';
+  } else {
+    eb.className = 'explanation wav';
+    et.style.color = '#a78bfa';
+    et.textContent = 'WAVELET — How it works';
+    ep.innerHTML = 'Haar wavelet recursively <strong>averages pairs of pixels</strong> (approximation) and stores their differences (detail coefficients). This creates a <strong>multi-resolution pyramid</strong>. Thresholding small detail coefficients removes fine information while preserving structure — avoiding JPEG\'s block artifacts. Foundation of <strong>JPEG 2000</strong>.';
+  }
+  run();
+}
+
+// ─── FILE UPLOAD ─────────────────────────────────────────────────────────────
+const fileInput = document.getElementById('fileInput');
+fileInput.onchange = function(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const img = new Image();
+  img.onload = () => { loadImageToCanvas(img); URL.revokeObjectURL(img.src); };
+  img.src = URL.createObjectURL(file);
+};
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  const file = e.dataTransfer.files[0]; if (!file || !file.type.startsWith('image/')) return;
+  const img = new Image();
+  img.onload = () => { loadImageToCanvas(img); URL.revokeObjectURL(img.src); };
+  img.src = URL.createObjectURL(file);
+});
+
+function loadImageToCanvas(img) {
+  const ctx = document.getElementById('cOrig').getContext('2d');
+  ctx.clearRect(0,0,SZ,SZ);
+  const ar = img.width / img.height;
+  let sx=0,sy=0,sw=img.width,sh=img.height;
+  if (ar > 1) { sw = img.height; sx = (img.width-sw)/2; }
+  else { sh = img.width; sy = (img.height-sh)/2; }
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SZ, SZ);
+  origData = ctx.getImageData(0, 0, SZ, SZ);
+  setStatus('Image loaded — processing…', true);
+  run();
+}
+
+// ─── DEMO IMAGE ───────────────────────────────────────────────────────────────
+function genDemo() {
+  const ctx = document.getElementById('cOrig').getContext('2d');
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,SZ,SZ);
+  // gradient blobs
+  const blobs = [
+    [60,70,80,'#00d4ff'], [180,60,60,'#7c3aed'], [130,150,90,'#22c55e'],
+    [60,200,50,'#f97316'], [200,190,65,'#e91e8c'], [120,80,40,'#ffeb3b']
+  ];
+  blobs.forEach(([x,y,r,c]) => {
+    const grd = ctx.createRadialGradient(x,y,2,x,y,r);
+    grd.addColorStop(0, c+'cc'); grd.addColorStop(1, c+'00');
+    ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  });
+  // checkerboard bottom
+  for (let row=180; row<SZ; row+=16)
+    for (let col=0; col<SZ; col+=16) {
+      ctx.fillStyle = ((row+col)/16%2===0) ? '#ffffff18' : '#00000040';
+      ctx.fillRect(col,row,16,16);
+    }
+  // text
+  ctx.font = 'bold 28px Space Mono, monospace';
+  ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center';
+  ctx.fillText('DEMO', SZ/2, SZ/2-10);
+  ctx.font = '12px DM Sans, sans-serif';
+  ctx.fillStyle = '#ffffff99';
+  ctx.fillText('upload your image above', SZ/2, SZ/2+14);
+  origData = ctx.getImageData(0,0,SZ,SZ);
+}
+
+// ─── DCT ─────────────────────────────────────────────────────────────────────
+function dct1d(a) {
+  const N=a.length, o=new Float32Array(N);
+  for (let k=0;k<N;k++) {
+    let s=0;
+    for (let n=0;n<N;n++) s+=a[n]*Math.cos(Math.PI*k*(2*n+1)/(2*N));
+    o[k]=(k===0?Math.SQRT1_2:1)*Math.sqrt(2/N)*s;
+  }
+  return o;
+}
+function idct1d(a) {
+  const N=a.length, o=new Float32Array(N);
+  for (let n=0;n<N;n++) {
+    let s=Math.SQRT1_2*a[0];
+    for (let k=1;k<N;k++) s+=a[k]*Math.cos(Math.PI*k*(2*n+1)/(2*N));
+    o[n]=Math.sqrt(2/N)*s;
+  }
+  return o;
+}
+function dct2d(blk,N) {
+  const tmp=new Float32Array(N*N);
+  for (let r=0;r<N;r++) { const row=blk.slice(r*N,r*N+N), t=dct1d(row); for(let c=0;c<N;c++) tmp[r*N+c]=t[c]; }
+  const out=new Float32Array(N*N);
+  for (let c=0;c<N;c++) { const col=new Float32Array(N); for(let r=0;r<N;r++) col[r]=tmp[r*N+c]; const t=dct1d(col); for(let r=0;r<N;r++) out[r*N+c]=t[r]; }
+  return out;
+}
+function idct2d(blk,N) {
+  const tmp=new Float32Array(N*N);
+  for (let r=0;r<N;r++) { const row=blk.slice(r*N,r*N+N), t=idct1d(row); for(let c=0;c<N;c++) tmp[r*N+c]=t[c]; }
+  const out=new Float32Array(N*N);
+  for (let c=0;c<N;c++) { const col=new Float32Array(N); for(let r=0;r<N;r++) col[r]=tmp[r*N+c]; const t=idct1d(col); for(let r=0;r<N;r++) out[r*N+c]=t[r]; }
+  return out;
+}
+function compressDCT(ch, blockSize, keepPct) {
+  const out=new Float32Array(SZ*SZ), cmap=new Float32Array(SZ*SZ);
+  const bpr=SZ/blockSize, total=blockSize*blockSize, keep=Math.max(1,Math.round(total*keepPct/100));
+  for (let by=0;by<bpr;by++) for (let bx=0;bx<bpr;bx++) {
+    const blk=new Float32Array(total);
+    for (let r=0;r<blockSize;r++) for (let c=0;c<blockSize;c++) blk[r*blockSize+c]=ch[(by*blockSize+r)*SZ+(bx*blockSize+c)];
+    const dc=dct2d(blk,blockSize);
+    const idx=Array.from({length:total},(_,i)=>i).sort((a,b)=>Math.abs(dc[b])-Math.abs(dc[a]));
+    const kp=new Float32Array(total);
+    for (let i=0;i<keep;i++) {
+      kp[idx[i]]=dc[idx[i]];
+      const r2=Math.floor(idx[i]/blockSize), c2=idx[i]%blockSize;
+      cmap[(by*blockSize+r2)*SZ+(bx*blockSize+c2)]=255;
+    }
+    const rec=idct2d(kp,blockSize);
+    for (let r=0;r<blockSize;r++) for (let c=0;c<blockSize;c++) out[(by*blockSize+r)*SZ+(bx*blockSize+c)]=Math.max(0,Math.min(255,rec[r*blockSize+c]));
+  }
+  return {out,cmap,kept:keep*bpr*bpr,total:total*bpr*bpr};
+}
+
+// ─── WAVELET ──────────────────────────────────────────────────────────────────
+function haar1d(a) {
+  const N=a.length, o=new Float32Array(N); let len=N;
+  const t=Float32Array.from(a);
+  while (len>1) {
+    const h=len>>1;
+    for (let i=0;i<h;i++){o[i]=(t[2*i]+t[2*i+1])*0.5;o[h+i]=(t[2*i]-t[2*i+1])*0.5;}
+    for (let i=0;i<len;i++) t[i]=o[i]; len=h;
+  }
+  return o;
+}
+function ihaar1d(a) {
+  const N=a.length, o=Float32Array.from(a); let len=1;
+  while (len<N) {
+    const t=new Float32Array(len*2);
+    for (let i=0;i<len;i++){t[2*i]=o[i]+o[len+i];t[2*i+1]=o[i]-o[len+i];}
+    for (let i=0;i<len*2;i++) o[i]=t[i]; len*=2;
+  }
+  return o;
+}
+function haar2d(ch) {
+  const o=Float32Array.from(ch);
+  for (let r=0;r<SZ;r++){const row=o.slice(r*SZ,r*SZ+SZ),t=haar1d(row);for(let c=0;c<SZ;c++)o[r*SZ+c]=t[c];}
+  for (let c=0;c<SZ;c++){const col=new Float32Array(SZ);for(let r=0;r<SZ;r++)col[r]=o[r*SZ+c];const t=haar1d(col);for(let r=0;r<SZ;r++)o[r*SZ+c]=t[r];}
+  return o;
+}
+function ihaar2d(ch) {
+  const o=Float32Array.from(ch);
+  for (let c=0;c<SZ;c++){const col=new Float32Array(SZ);for(let r=0;r<SZ;r++)col[r]=o[r*SZ+c];const t=ihaar1d(col);for(let r=0;r<SZ;r++)o[r*SZ+c]=t[r];}
+  for (let r=0;r<SZ;r++){const row=o.slice(r*SZ,r*SZ+SZ),t=ihaar1d(row);for(let c=0;c<SZ;c++)o[r*SZ+c]=t[c];}
+  return o;
+}
+function compressWavelet(ch, keepPct) {
+  const coeffs=haar2d(ch), total=SZ*SZ, keep=Math.max(1,Math.round(total*keepPct/100));
+  const idx=Array.from({length:total},(_,i)=>i).sort((a,b)=>Math.abs(coeffs[b])-Math.abs(coeffs[a]));
+  const kp=new Float32Array(total), cmap=new Float32Array(total);
+  for (let i=0;i<keep;i++){kp[idx[i]]=coeffs[idx[i]];cmap[idx[i]]=Math.min(255,Math.abs(coeffs[idx[i]])*2);}
+  const rec=ihaar2d(kp), out=new Float32Array(total);
+  for (let i=0;i<total;i++) out[i]=Math.max(0,Math.min(255,rec[i]));
+  return {out,cmap,kept:keep,total};
+}
+
+// ─── CHANNEL HELPERS ─────────────────────────────────────────────────────────
+function getChannels(data) {
+  const r=new Float32Array(SZ*SZ),g=new Float32Array(SZ*SZ),b=new Float32Array(SZ*SZ);
+  for (let i=0;i<SZ*SZ;i++){r[i]=data[i*4];g[i]=data[i*4+1];b[i]=data[i*4+2];}
+  return [r,g,b];
+}
+function getLuma(data) {
+  const y=new Float32Array(SZ*SZ);
+  for (let i=0;i<SZ*SZ;i++) y[i]=data[i*4]*0.299+data[i*4+1]*0.587+data[i*4+2]*0.114;
+  return y;
+}
+
+// ─── MAIN RUN ─────────────────────────────────────────────────────────────────
+function run() {
+  if (!origData || processing) return;
+  processing = true;
+  const sbDot = document.getElementById('sbDot');
+  sbDot.className = 'sb-dot working';
+  setStatus('Processing…', true);
+  const t0 = performance.now();
+
+  setTimeout(() => {
+    const keepPct = parseInt(document.getElementById('retainSlider').value);
+    const blockSize = parseInt(document.getElementById('blockSelect').value);
+    const isLuma = document.getElementById('channelSelect').value === 'luma';
+
+    let rRes,gRes,bRes, rCmap,gCmap,bCmap, keptTotal, totalCoeffs;
+
+    if (isLuma) {
+      const y = getLuma(origData.data);
+      const fn = mode==='dct' ? ch=>compressDCT(ch,blockSize,keepPct) : ch=>compressWavelet(ch,keepPct);
+      const {out,cmap,kept,total} = fn(y);
+      rRes=out; gRes=out; bRes=out; rCmap=cmap; gCmap=cmap; bCmap=cmap;
+      keptTotal=kept; totalCoeffs=total;
+    } else {
+      const [rCh,gCh,bCh] = getChannels(origData.data);
+      const fn = mode==='dct' ? ch=>compressDCT(ch,blockSize,keepPct) : ch=>compressWavelet(ch,keepPct);
+      ({out:rRes,cmap:rCmap,kept:keptTotal,total:totalCoeffs}=fn(rCh));
+      ({out:gRes,cmap:gCmap}=fn(gCh));
+      ({out:bRes,cmap:bCmap}=fn(bCh));
+      keptTotal *= 3; totalCoeffs *= 3;
+    }
+
+    // Draw reconstructed
+    const compCtx = document.getElementById('cComp').getContext('2d');
+    const compImg = compCtx.createImageData(SZ,SZ);
+    let mse=0;
+    const diffArr = new Int32Array(256);
+    for (let i=0;i<SZ*SZ;i++) {
+      compImg.data[i*4]=rRes[i]; compImg.data[i*4+1]=gRes[i]; compImg.data[i*4+2]=bRes[i]; compImg.data[i*4+3]=255;
+      const dr=origData.data[i*4]-rRes[i], dg=origData.data[i*4+1]-gRes[i], db=origData.data[i*4+2]-bRes[i];
+      mse+=(dr*dr+dg*dg+db*db)/3;
+      const diff=Math.round((Math.abs(dr)+Math.abs(dg)+Math.abs(db))/3);
+      diffArr[Math.min(255,diff)]++;
+    }
+    compCtx.putImageData(compImg,0,0);
+    mse /= SZ*SZ;
+
+    // Draw coefficient map
+    const coeffCtx = document.getElementById('cCoeff').getContext('2d');
+    const coeffImg = coeffCtx.createImageData(SZ,SZ);
+    for (let i=0;i<SZ*SZ;i++) {
+      const v=(rCmap[i]+gCmap[i]+bCmap[i])/3;
+      if (v>0) {
+        const bright=Math.min(255,v*1.5);
+        if (mode==='dct') { coeffImg.data[i*4]=0; coeffImg.data[i*4+1]=Math.round(bright*0.83); coeffImg.data[i*4+2]=Math.round(bright); }
+        else { coeffImg.data[i*4]=Math.round(bright*0.6); coeffImg.data[i*4+1]=Math.round(bright*0.25); coeffImg.data[i*4+2]=Math.round(bright); }
+        coeffImg.data[i*4+3]=255;
+      } else {
+        coeffImg.data[i*4]=16; coeffImg.data[i*4+1]=20; coeffImg.data[i*4+2]=28; coeffImg.data[i*4+3]=255;
+      }
+    }
+    coeffCtx.putImageData(coeffImg,0,0);
+
+    // Draw diff / loss map
+    const diffCtx = document.getElementById('cDiff').getContext('2d');
+    const diffImg = diffCtx.createImageData(SZ,SZ);
+    for (let i=0;i<SZ*SZ;i++) {
+      const dr=Math.abs(origData.data[i*4]-rRes[i]);
+      const dg=Math.abs(origData.data[i*4+1]-gRes[i]);
+      const db=Math.abs(origData.data[i*4+2]-bRes[i]);
+      const diff=Math.min(255,(dr+dg+db));
+      diffImg.data[i*4]=diff; diffImg.data[i*4+1]=Math.round(diff*0.2); diffImg.data[i*4+2]=0; diffImg.data[i*4+3]=255;
+    }
+    diffCtx.putImageData(diffImg,0,0);
+
+    // Metrics
+    const psnr = mse < 0.001 ? 99.9 : 10*Math.log10(255*255/mse);
+    const ratio = (totalCoeffs/keptTotal).toFixed(1);
+    document.getElementById('mRatio').textContent = ratio + ':1';
+    document.getElementById('mCoeff').textContent = keptTotal.toLocaleString();
+    document.getElementById('mTotal').textContent = totalCoeffs.toLocaleString();
+    document.getElementById('mMSE').textContent = mse.toFixed(2);
+    document.getElementById('mPSNR').textContent = psnr.toFixed(1) + ' dB';
+
+    // Quality badge
+    const qb = document.getElementById('qualBadge');
+    let qualLabel, qualColor, qualBg;
+    if (psnr >= 40) { qualLabel='Excellent'; qualColor='#22c55e'; qualBg='rgba(34,197,94,0.15)'; }
+    else if (psnr >= 35) { qualLabel='Good'; qualColor='#00d4ff'; qualBg='rgba(0,212,255,0.15)'; }
+    else if (psnr >= 28) { qualLabel='Fair'; qualColor='#f97316'; qualBg='rgba(249,115,22,0.15)'; }
+    else { qualLabel='Poor'; qualColor='#ef4444'; qualBg='rgba(239,68,68,0.15)'; }
+    qb.textContent = qualLabel;
+    qb.style.cssText = `color:${qualColor};background:${qualBg};display:inline-block;font-size:10px;font-family:Space Mono,monospace;font-weight:700;padding:2px 7px;border-radius:2px;margin-top:5px;`;
+
+    // Quality bar
+    const qPct = Math.min(100, Math.max(0, (psnr - 20) / 40 * 100));
+    const fill = document.getElementById('qualFill');
+    fill.style.width = qPct.toFixed(1) + '%';
+    fill.style.background = qPct > 75 ? '#22c55e' : qPct > 45 ? '#00d4ff' : qPct > 25 ? '#f97316' : '#ef4444';
+    document.getElementById('qbRight').textContent = psnr.toFixed(1) + ' dB PSNR';
+
+    // Histogram
+    drawHistogram(diffArr);
+
+    // Status
+    const elapsed = (performance.now()-t0).toFixed(0);
+    const modeLabel = mode==='dct' ? `DCT · Block: ${blockSize}×${blockSize}` : 'Wavelet (Haar)';
+    setStatus(`Done in ${elapsed}ms — ${keepPct}% coefficients retained`, false);
+    document.getElementById('sbMode').textContent = `Mode: ${modeLabel} · Channel: ${isLuma?'Luma':'RGB'}`;
+    document.getElementById('sbTime').textContent = `${elapsed}ms`;
+    sbDot.className = 'sb-dot';
+    processing = false;
+  }, 30);
+}
+
+function drawHistogram(diffArr) {
+  const c = document.getElementById('histCanvas');
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#10141c';
+  ctx.fillRect(0,0,W,H);
+  const maxV = Math.max(...Array.from(diffArr).slice(1));
+  if (maxV === 0) return;
+  const barW = W / 256;
+  for (let i=0;i<256;i++) {
+    const h = (diffArr[i]/maxV)*H*0.9;
+    const t = i/255;
+    const r = Math.round(t*239+(1-t)*0), g = Math.round(t*68+(1-t)*212), b = Math.round(t*68+(1-t)*255);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(i*barW, H-h, barW*0.85, h);
+  }
+  ctx.fillStyle = '#6b7a99';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.fillText('0', 2, H-2);
+  ctx.fillText('255', W-22, H-2);
+  ctx.fillText('← no loss', 6, 14);
+  ctx.fillText('max loss →', W-70, 14);
+}
+
+function setStatus(msg, busy) {
+  document.getElementById('sbText').textContent = msg;
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+genDemo();
+run();
+</script>
+</body>
+</html>
